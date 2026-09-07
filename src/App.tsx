@@ -27,6 +27,7 @@ import { correctedTime, createPlaybackState, isNewer, RoomBus } from "./sync";
 import type { PlaybackState, Room, RoomMode } from "./types";
 import { FilePeers } from "./file-peers";
 import { originalFileSource } from "./media-source";
+import { debugEvent, playbackFields } from "./debug";
 
 const roomIdFromPath = () => location.pathname.match(/^\/room\/([^/]+)/)?.[1];
 
@@ -291,8 +292,9 @@ function RoomView({
     if (!isHost || !video || video.readyState < 1) return;
     const state = createPlaybackState(video, ++revision.current);
     stateRef.current = state;
+    debugEvent("playback-send", room.id, playbackFields(state));
     void busRef.current?.send({ type: "playback", state });
-  }, [isHost]);
+  }, [isHost, room.id]);
 
   const followHost = useCallback(
     () => {
@@ -312,8 +314,14 @@ function RoomView({
         !video.seeking &&
         (hasPendingSeek || difference > 1.25) &&
         difference > tolerance
-      )
+      ) {
+        debugEvent("viewer-seek", room.id, {
+          revision: state.revision,
+          target: Number(target.toFixed(3)),
+          actual: Number(video.currentTime.toFixed(3)),
+        });
         video.currentTime = target;
+      }
       else if (hasPendingSeek && difference <= tolerance)
         pendingSeekRevision.current = null;
       if (state.paused) video.pause();
@@ -325,7 +333,7 @@ function RoomView({
             if (error.name === "NotAllowedError") setNeedsGesture(true);
           });
     },
-    [isHost],
+    [isHost, room.id],
   );
 
   useEffect(() => {
@@ -360,6 +368,7 @@ function RoomView({
           ) > 0.75;
         if (isDiscontinuous || wasWaitingForSeek)
           pendingSeekRevision.current = event.state.revision;
+        debugEvent("playback-received", room.id, playbackFields(event.state));
         lastHost = Date.now();
         setConnection("Connected");
         stateRef.current = event.state;
@@ -478,7 +487,10 @@ function RoomView({
     };
     const playing = () => setNeedsGesture(false);
     const reportPlayhead = () => proxyRef.current?.updatePlayhead(video.currentTime, video.duration);
-    for (const name of ["play", "pause", "seeked", "ratechange"])
+    // `seeking` fires as soon as the host changes position. `seeked` can be
+    // delayed for a large local file, which used to let a following play event
+    // broadcast the old timeline instead.
+    for (const name of ["play", "pause", "seeking", "seeked", "ratechange"])
       video.addEventListener(name, changed);
     video.addEventListener("loadedmetadata", ready);
     video.addEventListener("canplay", ready);
@@ -486,7 +498,7 @@ function RoomView({
     video.addEventListener("timeupdate", reportPlayhead);
     video.addEventListener("seeking", reportPlayhead);
     return () => {
-      for (const name of ["play", "pause", "seeked", "ratechange"])
+      for (const name of ["play", "pause", "seeking", "seeked", "ratechange"])
         video.removeEventListener(name, changed);
       video.removeEventListener("loadedmetadata", ready);
       video.removeEventListener("canplay", ready);
@@ -600,6 +612,7 @@ function RoomView({
               videoRef={videoRef}
               src={room.mode === "url" ? room.sourceUrl : fileUrl || undefined}
               isHost={isHost}
+              onHostSeek={sendPlayback}
               onError={() =>
                 setMessage(
                   "Cannot play this file or source. Use a browser-compatible video and audio format (for example MP4 with H.264/AAC, or WebM with VP9/Opus). Check that the host is connected.",
@@ -702,11 +715,13 @@ function VideoPlayer({
   videoRef,
   src,
   isHost,
+  onHostSeek,
   onError,
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   src?: string;
   isHost: boolean;
+  onHostSeek: () => void;
   onError: () => void;
 }) {
   const [playing, setPlaying] = useState(false);
@@ -750,6 +765,10 @@ function VideoPlayer({
     if (element && Number.isFinite(value)) {
       element.currentTime = value;
       setCurrent(value);
+      // Publish from the control itself as well as from media events. This is
+      // intentionally immediate: the host may hit play before a slow seek has
+      // completed, but viewers must already be aiming at the new time.
+      if (isHost) onHostSeek();
     }
   };
   const changeSpeed = (value: number) => {
