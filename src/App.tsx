@@ -265,6 +265,11 @@ function RoomView({
   const peersRef = useRef<FilePeers>();
   const fileRef = useRef<File | null>(null);
   const stateRef = useRef<PlaybackState | null>(null);
+  // A local-file viewer may receive a host seek before its browser has fetched
+  // the byte range for that point in the movie. Keep that seek alive until the
+  // media element has really landed there instead of treating one assignment
+  // to currentTime as a successful sync.
+  const pendingSeekRevision = useRef<number | null>(null);
   const proxyRef = useRef<{ close: () => void; updatePlayhead: (currentTime: number, duration: number) => void }>();
   const sourceGeneration = useRef(0);
   const revision = useRef(Date.now() * 1000);
@@ -290,7 +295,7 @@ function RoomView({
   }, [isHost]);
 
   const followHost = useCallback(
-    (initial = false) => {
+    () => {
       const video = videoRef.current;
       const state = stateRef.current;
       if (isHost || !video || !state || video.readyState < 1) return;
@@ -298,13 +303,19 @@ function RoomView({
       let target = correctedTime(state);
       if (Number.isFinite(video.duration))
         target = Math.min(target, Math.max(0, video.duration - 0.05));
-      // During a network stall, allow the pending range to arrive instead of seeking repeatedly.
+      const tolerance = state.paused ? 0.05 : 0.35;
+      const difference = Math.abs(video.currentTime - target);
+      const hasPendingSeek = pendingSeekRevision.current === state.revision;
+      // Metadata is enough to issue a seek. Waiting for HAVE_FUTURE_DATA here
+      // meant a phone could continue buffering its old position indefinitely.
       if (
         !video.seeking &&
-        (initial || video.readyState >= 3) &&
-        Math.abs(video.currentTime - target) > (state.paused ? 0.05 : 0.35)
+        (hasPendingSeek || difference > 1.25) &&
+        difference > tolerance
       )
         video.currentTime = target;
+      else if (hasPendingSeek && difference <= tolerance)
+        pendingSeekRevision.current = null;
       if (state.paused) video.pause();
       else if (video.paused)
         void video
@@ -338,6 +349,17 @@ function RoomView({
         !isHost &&
         isNewer(event.state, stateRef.current)
       ) {
+        const previous = stateRef.current;
+        const wasWaitingForSeek = pendingSeekRevision.current !== null;
+        const isDiscontinuous =
+          !previous ||
+          previous.paused !== event.state.paused ||
+          previous.playbackRate !== event.state.playbackRate ||
+          Math.abs(
+            event.state.currentTime - correctedTime(previous, event.state.updatedAt),
+          ) > 0.75;
+        if (isDiscontinuous || wasWaitingForSeek)
+          pendingSeekRevision.current = event.state.revision;
         lastHost = Date.now();
         setConnection("Connected");
         stateRef.current = event.state;
@@ -434,6 +456,17 @@ function RoomView({
   }, [room.id, room.mode, isHost, viewerId, followHost, sendPlayback]);
 
   useEffect(() => {
+    if (isHost) return;
+    // Some mobile browsers do not emit canplay again while a range request is
+    // being retried. A lightweight convergence pass makes a host seek robust
+    // across that gap without constantly seeking during normal playback.
+    const timer = window.setInterval(() => {
+      if (pendingSeekRevision.current !== null) followHost();
+    }, 400);
+    return () => clearInterval(timer);
+  }, [isHost, followHost]);
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     const changed = () => {
@@ -441,7 +474,7 @@ function RoomView({
     };
     const ready = () => {
       if (isHost) sendPlayback();
-      else followHost(true);
+      else followHost();
     };
     const playing = () => setNeedsGesture(false);
     const reportPlayhead = () => proxyRef.current?.updatePlayhead(video.currentTime, video.duration);
@@ -741,8 +774,31 @@ function VideoPlayer({
     setMuted(element.muted);
   };
   const fullscreen = () => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else playerRef.current?.requestFullscreen();
+    const video = videoRef.current;
+    const player = playerRef.current;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+    // iPhone Safari supports fullscreen on the media element rather than an
+    // arbitrary wrapper. Prefer the standard API everywhere else so the
+    // custom controls remain available on iPad, Android, and desktop.
+    const legacyVideo = video as (HTMLVideoElement & {
+      webkitEnterFullscreen?: () => void;
+      webkitDisplayingFullscreen?: boolean;
+    }) | null;
+    const legacyDocument = document as Document & {
+      webkitExitFullscreen?: () => void;
+    };
+    if (legacyVideo?.webkitDisplayingFullscreen) {
+      legacyDocument.webkitExitFullscreen?.();
+      return;
+    }
+    if (player?.requestFullscreen) {
+      void player.requestFullscreen().catch(() => {
+        legacyVideo?.webkitEnterFullscreen?.();
+      });
+    } else legacyVideo?.webkitEnterFullscreen?.();
   };
   return (
     <div
