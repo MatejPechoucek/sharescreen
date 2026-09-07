@@ -109,7 +109,13 @@ export class FilePeers {
       });
   }
   private create(id: string, session: string) {
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    // Relay-only is intentional for this deployment: it avoids network-specific
+    // direct-P2P failures and always routes file ranges through the configured
+    // TURN service.
+    const pc = new RTCPeerConnection({
+      iceServers: this.iceServers,
+      iceTransportPolicy: "relay",
+    });
     const peer: Peer = { pc, session, candidates: [] };
     this.peers.set(id, peer);
     pc.onicecandidate = (event) => {
