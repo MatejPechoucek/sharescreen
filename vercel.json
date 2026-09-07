@@ -1,5 +1,9 @@
 {
-  "rewrites": [
-    { "source": "/room/:id", "destination": "/index.html" }
-  ]
+  "headers": [
+    {
+      "source": "/media-sw.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    }
+  ],
+  "rewrites": [{ "source": "/room/:id", "destination": "/index.html" }]
 }

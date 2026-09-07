@@ -1,0 +1,63 @@
+.transfer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid #35482a;
+  border-radius: 10px;
+  padding: 14px;
+  background: #1a2415;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d1e8bd;
+}
+.transfer-info strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green);
+}
+.transfer-info small {
+  color: #9da795;
+  font-size: 11px;
+}
+.enable-playback {
+  margin-top: 14px;
+  width: 100%;
+}
+.buffering-indicator {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  background: #0005;
+  pointer-events: none;
+  color: #e5f7d2;
+  font-size: 13px;
+}
+.viewer-player .controls-right .player-button {
+  display: grid;
+  cursor: pointer;
+}
+.custom-player:not(.is-playing) .player-controls {
+  opacity: 1;
+  transform: none;
+}
+.viewer-player .player-controls {
+  background: linear-gradient(transparent, #000c);
+  padding-top: 28px;
+}
+.player-button:focus-visible,
+.seekbar:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+@media (hover: none) {
+  .custom-player .player-controls {
+    opacity: 1;
+    transform: none;
+  }
+}
