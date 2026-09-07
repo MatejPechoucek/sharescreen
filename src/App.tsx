@@ -265,7 +265,7 @@ function RoomView({
   const peersRef = useRef<FilePeers>();
   const fileRef = useRef<File | null>(null);
   const stateRef = useRef<PlaybackState | null>(null);
-  const proxyRef = useRef<{ close: () => void }>();
+  const proxyRef = useRef<{ close: () => void; updatePlayhead: (currentTime: number, duration: number) => void }>();
   const sourceGeneration = useRef(0);
   const revision = useRef(Date.now() * 1000);
   const viewerId = useMemo(() => crypto.randomUUID(), []);
@@ -444,17 +444,22 @@ function RoomView({
       else followHost(true);
     };
     const playing = () => setNeedsGesture(false);
+    const reportPlayhead = () => proxyRef.current?.updatePlayhead(video.currentTime, video.duration);
     for (const name of ["play", "pause", "seeked", "ratechange"])
       video.addEventListener(name, changed);
     video.addEventListener("loadedmetadata", ready);
     video.addEventListener("canplay", ready);
     video.addEventListener("playing", playing);
+    video.addEventListener("timeupdate", reportPlayhead);
+    video.addEventListener("seeking", reportPlayhead);
     return () => {
       for (const name of ["play", "pause", "seeked", "ratechange"])
         video.removeEventListener(name, changed);
       video.removeEventListener("loadedmetadata", ready);
       video.removeEventListener("canplay", ready);
       video.removeEventListener("playing", playing);
+      video.removeEventListener("timeupdate", reportPlayhead);
+      video.removeEventListener("seeking", reportPlayhead);
     };
   }, [fileUrl, isHost, followHost, sendPlayback]);
 

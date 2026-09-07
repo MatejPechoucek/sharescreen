@@ -16,6 +16,14 @@ No whole-file ArrayBuffer/Blob is created on the viewer. Application reads are
 bounded to 256 KiB, split into messages smaller than 16 KiB with send-buffer
 backpressure. A maximum of eight reads may be outstanding per peer.
 
+The service worker keeps a rolling in-memory cache of the exact byte blocks the
+browser asks for. It favors blocks approximating one minute before/after the
+viewer playhead and evicts older/farther blocks, with a **48 MB total cap** across
+active original-file sources. This is only an optimization: it never changes the
+bytes served or substitutes a rough byte/time estimate for an actual range request.
+The browser's own media buffer remains the authority for decoding and may evict
+data separately.
+
 Original audio stays inside the original file. Each viewer controls their own
 volume/mute. If autoplay is blocked, use **Enable video & sound**. Host play, pause,
 seek, and playback speed remain synchronized separately from file transfer.
@@ -34,8 +42,9 @@ seek, and playback speed remain synchronized separately from file transfer.
   of viewers; clients can re-request bytes after a seek. The received-byte counter
   includes repeated reads and is not a whole-file download percentage.
 - STUN is configured; some networks need TURN. There is no TURN provider configured.
-- Browser playback buffers consume memory, but application memory does not scale with
-  the entire movie size. Native decoding/rendering performance still depends on device hardware.
+- Browser playback buffers consume memory, but application cache memory is capped at
+  48 MB and does not scale with the entire movie size. Native decoding/rendering
+  performance still depends on device hardware.
 
 ## Development and deployment
 

@@ -81,6 +81,11 @@ export async function originalFileSource(remote: RemoteFile, info: FileInfo) {
     });
     return {
       url: `/__relay_media/${clientId}/${token}`,
+      updatePlayhead(currentTime: number, duration: number) {
+        if (Number.isFinite(currentTime) && Number.isFinite(duration) && duration > 0) {
+          navigator.serviceWorker.controller?.postMessage({ type: "relay-playhead", token, currentTime, duration });
+        }
+      },
       close() {
         navigator.serviceWorker.removeEventListener("message", onMessage);
         connections.forEach((abort, port) => {
