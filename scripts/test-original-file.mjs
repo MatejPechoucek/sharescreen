@@ -132,6 +132,9 @@ try {
   await viewer.goto(host.url());
   await viewer.locator("video").waitFor();
   await host.locator("input[type=file]").first().setInputFiles(fixture);
+  await host.locator("video").evaluate((video) => {
+    video.loop = true;
+  });
   await host
     .getByRole("button", { name: "Play", exact: true })
     .click({ force: true });
