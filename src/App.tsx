@@ -308,6 +308,7 @@ function RoomView({
       const tolerance = state.paused ? 0.05 : 0.35;
       const difference = Math.abs(video.currentTime - target);
       const hasPendingSeek = pendingSeekRevision.current === state.revision;
+      let seekingToHost = false;
       // Metadata is enough to issue a seek. Waiting for HAVE_FUTURE_DATA here
       // meant a phone could continue buffering its old position indefinitely.
       if (
@@ -321,11 +322,20 @@ function RoomView({
           actual: Number(video.currentTime.toFixed(3)),
         });
         video.currentTime = target;
+        seekingToHost = true;
       }
       else if (hasPendingSeek && difference <= tolerance)
         pendingSeekRevision.current = null;
       if (state.paused) video.pause();
-      else if (video.paused)
+      // Never start decoding from the browser's default 0:00 position. For a
+      // late join or a host scrub, wait until the media element has reached
+      // the requested time; then it fetches the range around that playhead.
+      else if (
+        !seekingToHost &&
+        !video.seeking &&
+        difference <= tolerance &&
+        video.paused
+      )
         void video
           .play()
           .then(() => setNeedsGesture(false))
@@ -403,7 +413,9 @@ function RoomView({
         setMessage("");
         setTransfer("Buffering original file…");
         try {
-          const source = await originalFileSource(remote, info);
+          const hostState = stateRef.current;
+          const initialTime = hostState ? correctedTime(hostState) : 0;
+          const source = await originalFileSource(remote, info, initialTime);
           if (!active || generation !== sourceGeneration.current) {
             source.close();
             return;
@@ -485,6 +497,9 @@ function RoomView({
       if (isHost) sendPlayback();
       else followHost();
     };
+    const viewerSeeked = () => {
+      if (!isHost) followHost();
+    };
     const playing = () => setNeedsGesture(false);
     const reportPlayhead = () => proxyRef.current?.updatePlayhead(video.currentTime, video.duration);
     // `seeking` fires as soon as the host changes position. `seeked` can be
@@ -494,6 +509,7 @@ function RoomView({
       video.addEventListener(name, changed);
     video.addEventListener("loadedmetadata", ready);
     video.addEventListener("canplay", ready);
+    video.addEventListener("seeked", viewerSeeked);
     video.addEventListener("playing", playing);
     video.addEventListener("timeupdate", reportPlayhead);
     video.addEventListener("seeking", reportPlayhead);
@@ -502,6 +518,7 @@ function RoomView({
         video.removeEventListener(name, changed);
       video.removeEventListener("loadedmetadata", ready);
       video.removeEventListener("canplay", ready);
+      video.removeEventListener("seeked", viewerSeeked);
       video.removeEventListener("playing", playing);
       video.removeEventListener("timeupdate", reportPlayhead);
       video.removeEventListener("seeking", reportPlayhead);
@@ -835,7 +852,7 @@ function VideoPlayer({
         onCanPlay={() => setBuffering(false)}
         onPlaying={() => setBuffering(false)}
         playsInline
-        preload="auto"
+        preload="metadata"
         className="video"
         onClick={isHost ? togglePlay : undefined}
       />

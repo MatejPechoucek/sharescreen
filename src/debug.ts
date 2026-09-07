@@ -9,6 +9,11 @@ export function debugEvent(
   roomId: string,
   fields: DebugFields = {},
 ) {
+  if (
+    location.hostname === "localhost" ||
+    location.hostname === "127.0.0.1"
+  )
+    return;
   const payload = JSON.stringify({
     event,
     roomId,

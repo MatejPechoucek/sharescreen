@@ -1,6 +1,10 @@
 import { RemoteFile, type FileInfo } from "./file-transfer";
 
-export async function originalFileSource(remote: RemoteFile, info: FileInfo) {
+export async function originalFileSource(
+  remote: RemoteFile,
+  info: FileInfo,
+  initialTime = 0,
+) {
   if (!("serviceWorker" in navigator))
     throw new Error(
       "This browser cannot stream original files. Use a recent Chrome, Edge, Firefox, or Safari browser.",
@@ -80,7 +84,10 @@ export async function originalFileSource(remote: RemoteFile, info: FileInfo) {
       ]);
     });
     return {
-      url: `/__relay_media/${clientId}/${token}`,
+      // A media fragment is handled by the browser (it is not sent to the
+      // service worker). It makes a late viewer's first decode seek target the
+      // host position instead of the implicit 0:00 default.
+      url: `/__relay_media/${clientId}/${token}#t=${Math.max(0, initialTime)}`,
       updatePlayhead(currentTime: number, duration: number) {
         if (Number.isFinite(currentTime) && Number.isFinite(duration) && duration > 0) {
           navigator.serviceWorker.controller?.postMessage({ type: "relay-playhead", token, currentTime, duration });

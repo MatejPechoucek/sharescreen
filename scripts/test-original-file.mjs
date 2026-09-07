@@ -219,12 +219,15 @@ try {
   );
   assert.equal(actual.status, 206);
   console.log("EXACT_BYTES", JSON.stringify(actual));
+  // A host can scrub and hit play immediately. The viewer must not resume at
+  // its old/default position while the destination range is still loading.
+  await viewer.evaluate(() => {
+    window.testPlayPositions = [];
+    document.querySelector("video").addEventListener("play", (event) => {
+      window.testPlayPositions.push(event.currentTarget.currentTime);
+    });
+  });
   await host.locator(".seekbar").fill("28");
-  await viewer.waitForFunction(
-    () => Math.abs(document.querySelector("video").currentTime - 28) < 1,
-    null,
-    { timeout: 30000 },
-  );
   await host
     .getByRole("button", { name: "Play", exact: true })
     .click({ force: true });
@@ -235,6 +238,11 @@ try {
     },
     null,
     { timeout: 30000 },
+  );
+  const playPositions = await viewer.evaluate(() => window.testPlayPositions);
+  assert(
+    playPositions.every((time) => time > 27),
+    `Viewer started before reaching the host seek target: ${playPositions}`,
   );
   await checkpoint("seek-unbuffered");
   await host
