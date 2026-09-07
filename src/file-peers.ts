@@ -29,6 +29,10 @@ export class FilePeers {
   private attemptStarted = Date.now();
   private closed = false;
   private queue = Promise.resolve();
+  private iceServers: RTCIceServer[] = [
+    { urls: "stun:stun.l.google.com:19302" },
+  ];
+  private iceReady: Promise<void>;
   constructor(
     private options: {
       id: string;
@@ -39,12 +43,33 @@ export class FilePeers {
       onStatus: (status: string) => void;
       onError: (message: string) => void;
     },
-  ) {}
+  ) {
+    this.iceReady = fetch("/api/ice")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!Array.isArray(payload.iceServers)) return;
+        const servers = payload.iceServers.filter(
+          (server: unknown): server is RTCIceServer =>
+            Boolean(
+              server &&
+                typeof server === "object" &&
+                (typeof (server as RTCIceServer).urls === "string" ||
+                  Array.isArray((server as RTCIceServer).urls)),
+            ),
+        );
+        if (servers.length) this.iceServers = servers;
+      })
+      .catch(() => {
+        // Direct P2P with the bundled STUN server remains available.
+      });
+  }
   setFile(file: File) {
     this.source = { file, info: fileInfo(file) };
     this.peers.forEach((peer) => peer.serve?.announce());
   }
-  tick() {
+  async tick() {
+    await this.iceReady;
     if (this.closed || this.options.isHost) return;
     if (
       [...this.peers.values()].some(
@@ -84,9 +109,7 @@ export class FilePeers {
       });
   }
   private create(id: string, session: string) {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
     const peer: Peer = { pc, session, candidates: [] };
     this.peers.set(id, peer);
     pc.onicecandidate = (event) => {
@@ -142,6 +165,7 @@ export class FilePeers {
   }
   private async handle(message: Signal) {
     if (this.closed) return;
+    await this.iceReady;
     const { isHost, id } = this.options;
     let peer = this.peers.get(message.from);
     if (isHost && message.kind === "ready") {
